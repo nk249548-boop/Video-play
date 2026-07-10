@@ -11,78 +11,83 @@ jobs:
         run: |
           # Install tools
           sudo apt update && sudo apt install -y make clang gcc
-          
+
           # Use NDK r21e
           wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
           unzip -q android-ndk-r21e-linux-x86_64.zip
           export NDK_PATH="$(pwd)/android-ndk-r21e"
-          
-          # Clone Media3 1.2.0
-          # FIX 1: Use --depth 1 to avoid annotated tag checkout issues
-          git clone --depth 1 --branch release/1.2 https://github.com/androidx/media.git
+
+          # FIX 1: Correct tag is "1.2.0", NOT "release/1.2"
+          # --no-single-branch ensures tags are fetched with --depth 1
+          git clone --depth 1 --branch 1.2.0 --no-single-branch \
+            https://github.com/androidx/media.git
           cd media/libraries/decoder_ffmpeg/src/main/jni
-          
+
           # Download FFmpeg 6.0
           wget -q https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
           tar -xf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg
-          
-          # Remove invalid flag
+
+          # Remove invalid flag (not in FFmpeg 6.0)
           sed -i 's/--disable-avresample//g' build_ffmpeg.sh
-          
-          # FIX 2: Run build_ffmpeg.sh — this builds .a static libs
+
+          # Run build_ffmpeg.sh
+          # Args: <output_dir> <ndk_path> <host_platform> <api_level> [codecs...]
+          # Output .a files land at: src/main/arm64-v8a/*.a  (i.e. one level up = "../")
           chmod +x build_ffmpeg.sh
-          ./build_ffmpeg.sh "$(pwd)/.." $NDK_PATH "linux-x86_64" 21 ac3 eac3 flac alac
-          
-          # FIX 3: Create Android.mk manually — it does NOT exist in the repo
-          # This tells ndk-build how to link the .a files into libffmpeg.so
-          cat > Android.mk << 'EOF'
-          LOCAL_PATH := $(call my-dir)
-          
-          include $(CLEAR_VARS)
-          LOCAL_MODULE := avcodec
-          LOCAL_SRC_FILES := ../libs/arm64-v8a/libavcodec.a
-          include $(PREBUILT_STATIC_LIBRARY)
-          
-          include $(CLEAR_VARS)
-          LOCAL_MODULE := avutil
-          LOCAL_SRC_FILES := ../libs/arm64-v8a/libavutil.a
-          include $(PREBUILT_STATIC_LIBRARY)
-          
-          include $(CLEAR_VARS)
-          LOCAL_MODULE := swresample
-          LOCAL_SRC_FILES := ../libs/arm64-v8a/libswresample.a
-          include $(PREBUILT_STATIC_LIBRARY)
-          
-          include $(CLEAR_VARS)
-          LOCAL_MODULE    := ffmpeg
-          LOCAL_WHOLE_STATIC_LIBRARIES := avcodec avutil swresample
-          include $(BUILD_SHARED_LIBRARY)
-          EOF
-          
-          # FIX 4: Create Application.mk to set API level explicitly
-          # (removes the "APP_PLATFORM not set" warning that caused abort in r21e)
-          cat > Application.mk << 'EOF'
-          APP_ABI := arm64-v8a
-          APP_PLATFORM := android-21
-          APP_STL := c++_shared
-          EOF
-          
-          # FIX 5: Run ndk-build from the jni/ directory directly
-          # No need for absolute PROJECT_DIR — run from current directory
-          cd "$(pwd)"
-          $NDK_PATH/ndk-build \
-            APP_BUILD_SCRIPT="$(pwd)/Android.mk" \
+          ./build_ffmpeg.sh "$(pwd)/.." "$NDK_PATH" "linux-x86_64" 21 ac3 eac3 flac alac
+
+          # Verify .a files were actually produced
+          echo "=== Built .a files ===" && ls -lh ../arm64-v8a/*.a
+
+          # FIX 2: Android.mk — correct .a path is ../arm64-v8a/ NOT ../libs/arm64-v8a/
+          # build_ffmpeg.sh writes to <output_dir>/arm64-v8a/, and output_dir = src/main/
+          # We are in jni/, so relative path to .a files = ../arm64-v8a/
+          cat > Android.mk << 'ANDROIDMK'
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE    := avcodec
+LOCAL_SRC_FILES := ../arm64-v8a/libavcodec.a
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE    := avutil
+LOCAL_SRC_FILES := ../arm64-v8a/libavutil.a
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE    := swresample
+LOCAL_SRC_FILES := ../arm64-v8a/libswresample.a
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE                  := ffmpeg
+LOCAL_WHOLE_STATIC_LIBRARIES  := avcodec avutil swresample
+include $(BUILD_SHARED_LIBRARY)
+ANDROIDMK
+
+          # Application.mk — sets API level to suppress NDK abort
+          cat > Application.mk << 'APPMK'
+APP_ABI      := arm64-v8a
+APP_PLATFORM := android-21
+APP_STL      := c++_shared
+APPMK
+
+          # Run ndk-build from jni/ with explicit paths
+          "$NDK_PATH/ndk-build" \
+            APP_BUILD_SCRIPT="$(pwd)/Android.mk"    \
             NDK_APPLICATION_MK="$(pwd)/Application.mk" \
-            NDK_PROJECT_PATH="$(pwd)" \
-            APP_ABI="arm64-v8a" \
+            NDK_PROJECT_PATH="$(pwd)"               \
+            APP_ABI="arm64-v8a"                     \
             -j4
-          
-          # Copy output .so to expected location
+
+          # ndk-build writes output to: jni/libs/arm64-v8a/libffmpeg.so
+          # Copy to the upload path
           mkdir -p ../libs/arm64-v8a
-          cp -f libs/arm64-v8a/libffmpeg.so ../libs/arm64-v8a/ 2>/dev/null || \
-            find . -name "libffmpeg.so" -exec cp {} ../libs/arm64-v8a/ \;
-          
+          cp libs/arm64-v8a/libffmpeg.so ../libs/arm64-v8a/
+          echo "=== Output ===" && ls -lh ../libs/arm64-v8a/
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
