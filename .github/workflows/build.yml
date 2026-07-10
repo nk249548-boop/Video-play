@@ -1,34 +1,38 @@
 name: Build FFmpeg for Android
-on: [push]
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      
       - name: Build
         run: |
           # Install tools
           sudo apt update && sudo apt install -y make clang gcc
+          
           # Download NDK
           wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
           unzip android-ndk-r26b-linux.zip
           export NDK_PATH="$(pwd)/android-ndk-r26b"
+          
           # Clone Media3
           git clone https://github.com/androidx/media.git
           cd media/libraries/decoder_ffmpeg/src/main/jni
+          
           # Download FFmpeg
           wget https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
           tar -xf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg
+          
           # Compile
           chmod +x build_ffmpeg.sh
           ./build_ffmpeg.sh "$(pwd)/.." $NDK_PATH "linux-x86_64" 21 ac3 eac3 flac alac
-          # Move result to artifact folder
-          mkdir -p ../../../../jniLibs/arm64-v8a/
-          cp -r ../../../../jniLibs/arm64-v8a/libffmpeg.so . 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: ffmpeg-library
-          path: media/libraries/decoder_ffmpeg/src/main/jni/ffmpeg/
           
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libffmpeg-android
+          path: media/libraries/decoder_ffmpeg/src/main/jniLibs/
+
