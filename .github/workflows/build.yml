@@ -12,7 +12,7 @@ jobs:
           # Install tools
           sudo apt update && sudo apt install -y make clang gcc
           
-          # FIX: Use NDK r21e (The only NDK perfectly compatible with older API 16 build scripts)
+          # Use NDK r21e
           wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
           unzip -q android-ndk-r21e-linux-x86_64.zip
           export NDK_PATH="$(pwd)/android-ndk-r21e"
@@ -33,14 +33,14 @@ jobs:
           chmod +x build_ffmpeg.sh
           ./build_ffmpeg.sh "$(pwd)/.." $NDK_PATH "linux-x86_64" 21 ac3 eac3 flac alac
           
-          # FINAL STEP: Link everything into libffmpeg.so
+          # FINAL STEP: Link using exact absolute paths (The Fix)
           cd ..
-          $NDK_PATH/ndk-build APP_ABI="arm64-v8a" -j4
+          export PROJECT_DIR="$(pwd)"
+          $NDK_PATH/ndk-build NDK_PROJECT_PATH="$PROJECT_DIR" APP_BUILD_SCRIPT="$PROJECT_DIR/jni/Android.mk" NDK_APPLICATION_MK="$PROJECT_DIR/jni/Application.mk" APP_ABI="arm64-v8a" -j4
           
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: libffmpeg-android
           path: media/libraries/decoder_ffmpeg/src/main/libs/
-
 
