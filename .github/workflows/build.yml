@@ -9,67 +9,89 @@ jobs:
 
       - name: Build
         run: |
+          # Install tools
           sudo apt update && sudo apt install -y make clang gcc
 
+          # NDK r21e
           wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
           unzip -q android-ndk-r21e-linux-x86_64.zip
           export NDK_PATH="$(pwd)/android-ndk-r21e"
 
+          # Clone Media3 at tag 1.2.0
           git clone --depth 1 --branch 1.2.0 --no-single-branch \
             https://github.com/androidx/media.git
           cd media/libraries/decoder_ffmpeg/src/main/jni
 
+          # Download and extract FFmpeg 6.0
           wget -q https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
           tar -xf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg
 
+          # Remove invalid flag
           sed -i 's/--disable-avresample//g' build_ffmpeg.sh
           chmod +x build_ffmpeg.sh
+
+          # Run build_ffmpeg.sh — compiles FFmpeg static libs for all ABIs
           ./build_ffmpeg.sh "$(pwd)/.." "$NDK_PATH" "linux-x86_64" 21 ac3 eac3 flac alac
 
-          echo "=== Built .a files ==="
-          ls -lh ../arm64-v8a/*.a
+          # FIX: Discover where .a files actually landed instead of assuming the path
+          echo "=== Finding built .a files ==="
+          find "$(pwd)/.." -name "libavcodec.a" 2>/dev/null
+          find "$(pwd)/.." -name "libavutil.a"  2>/dev/null
+          find /usr/local    -name "libavcodec.a" 2>/dev/null
 
-          printf '%s\n' \
-            'LOCAL_PATH := $(call my-dir)' \
-            '' \
-            'include $(CLEAR_VARS)' \
-            'LOCAL_MODULE    := avcodec' \
-            'LOCAL_SRC_FILES := ../arm64-v8a/libavcodec.a' \
-            'include $(PREBUILT_STATIC_LIBRARY)' \
-            '' \
-            'include $(CLEAR_VARS)' \
-            'LOCAL_MODULE    := avutil' \
-            'LOCAL_SRC_FILES := ../arm64-v8a/libavutil.a' \
-            'include $(PREBUILT_STATIC_LIBRARY)' \
-            '' \
-            'include $(CLEAR_VARS)' \
-            'LOCAL_MODULE    := swresample' \
-            'LOCAL_SRC_FILES := ../arm64-v8a/libswresample.a' \
-            'include $(PREBUILT_STATIC_LIBRARY)' \
-            '' \
-            'include $(CLEAR_VARS)' \
-            'LOCAL_MODULE                 := ffmpeg' \
-            'LOCAL_WHOLE_STATIC_LIBRARIES := avcodec avutil swresample' \
-            'include $(BUILD_SHARED_LIBRARY)' \
-            > Android.mk
+          # Extract the arm64-v8a .a directory path dynamically
+          AVCODEC_PATH=$(find "$(pwd)/.." /usr/local -name "libavcodec.a" \
+            -path "*arm64*" 2>/dev/null | head -1)
 
-          printf '%s\n' \
-            'APP_ABI      := arm64-v8a' \
-            'APP_PLATFORM := android-21' \
-            'APP_STL      := c++_shared' \
-            > Application.mk
+          # Fallback: check /usr/local/lib if not found under arm64 path
+          if [ -z "$AVCODEC_PATH" ]; then
+            AVCODEC_PATH=$(find /usr/local -name "libavcodec.a" 2>/dev/null | head -1)
+          fi
 
+          echo "Found libavcodec.a at: $AVCODEC_PATH"
+          LIBS_DIR=$(dirname "$AVCODEC_PATH")
+          echo "Libs directory: $LIBS_DIR"
+
+          # Generate Android.mk with the real discovered paths
+          printf 'LOCAL_PATH := $(call my-dir)\n\n' > Android.mk
+          printf 'include $(CLEAR_VARS)\n' >> Android.mk
+          printf 'LOCAL_MODULE    := avcodec\n' >> Android.mk
+          printf 'LOCAL_SRC_FILES := %s/libavcodec.a\n' "$LIBS_DIR" >> Android.mk
+          printf 'include $(PREBUILT_STATIC_LIBRARY)\n\n' >> Android.mk
+          printf 'include $(CLEAR_VARS)\n' >> Android.mk
+          printf 'LOCAL_MODULE    := avutil\n' >> Android.mk
+          printf 'LOCAL_SRC_FILES := %s/libavutil.a\n' "$LIBS_DIR" >> Android.mk
+          printf 'include $(PREBUILT_STATIC_LIBRARY)\n\n' >> Android.mk
+          printf 'include $(CLEAR_VARS)\n' >> Android.mk
+          printf 'LOCAL_MODULE    := swresample\n' >> Android.mk
+          printf 'LOCAL_SRC_FILES := %s/libswresample.a\n' "$LIBS_DIR" >> Android.mk
+          printf 'include $(PREBUILT_STATIC_LIBRARY)\n\n' >> Android.mk
+          printf 'include $(CLEAR_VARS)\n' >> Android.mk
+          printf 'LOCAL_MODULE                 := ffmpeg\n' >> Android.mk
+          printf 'LOCAL_WHOLE_STATIC_LIBRARIES := avcodec avutil swresample\n' >> Android.mk
+          printf 'include $(BUILD_SHARED_LIBRARY)\n' >> Android.mk
+
+          echo "=== Android.mk contents ==="
+          cat Android.mk
+
+          # Application.mk
+          printf 'APP_ABI      := arm64-v8a\n' > Application.mk
+          printf 'APP_PLATFORM := android-21\n' >> Application.mk
+          printf 'APP_STL      := c++_shared\n' >> Application.mk
+
+          # Run ndk-build
           "$NDK_PATH/ndk-build" \
-            APP_BUILD_SCRIPT="$(pwd)/Android.mk" \
+            APP_BUILD_SCRIPT="$(pwd)/Android.mk"       \
             NDK_APPLICATION_MK="$(pwd)/Application.mk" \
-            NDK_PROJECT_PATH="$(pwd)" \
-            APP_ABI="arm64-v8a" \
+            NDK_PROJECT_PATH="$(pwd)"                  \
+            APP_ABI="arm64-v8a"                        \
             -j4
 
+          # Copy output
           mkdir -p ../libs/arm64-v8a
           cp libs/arm64-v8a/libffmpeg.so ../libs/arm64-v8a/
-          echo "=== Output ==="
+          echo "=== Final output ==="
           ls -lh ../libs/arm64-v8a/
 
       - name: Upload Artifact
