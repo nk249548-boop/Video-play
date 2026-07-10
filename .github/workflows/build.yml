@@ -26,6 +26,9 @@ jobs:
           tar -xf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg
           
+          # FIX THE ERROR: Script mein se purane aur invalid flag ko delete karein
+          sed -i 's/--disable-avresample//g' build_ffmpeg.sh
+          
           # Compile FFmpeg raw files
           chmod +x build_ffmpeg.sh
           ./build_ffmpeg.sh "$(pwd)/.." $NDK_PATH "linux-x86_64" 21 ac3 eac3 flac alac
@@ -39,4 +42,3 @@ jobs:
         with:
           name: libffmpeg-android
           path: media/libraries/decoder_ffmpeg/src/main/libs/
-
