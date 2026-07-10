@@ -14,7 +14,7 @@ jobs:
           
           # Download NDK
           wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
-          unzip android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
           export NDK_PATH="$(pwd)/android-ndk-r26b"
           
           # Clone Media3
@@ -26,13 +26,16 @@ jobs:
           tar -xf ffmpeg-6.0.tar.bz2
           mv ffmpeg-6.0 ffmpeg
           
-          # Compile
+          # Compile FFmpeg raw files
           chmod +x build_ffmpeg.sh
           ./build_ffmpeg.sh "$(pwd)/.." $NDK_PATH "linux-x86_64" 21 ac3 eac3 flac alac
+          
+          # FINAL STEP: Link everything into libffmpeg.so using NDK
+          $NDK_PATH/ndk-build APP_ABI="arm64-v8a" -j4
           
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: libffmpeg-android
-          path: media/libraries/decoder_ffmpeg/src/main/jniLibs/
+          path: media/libraries/decoder_ffmpeg/src/main/libs/
 
